@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRTS // MONITOR SYSTEM v2.0</title>
+    <!-- Google Fonts: 科技感等宽 + 锐利无衬线 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <!-- 样式 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <!-- 扫描线覆盖层 -->
+    <div class="scanline-overlay"></div>
+
+    <!-- ==================== 顶部 Header ==================== -->
+    <header class="terminal-header">
+        <div class="header-top">
+            <div class="header-left">
+                <span class="header-title">RHODES ISLAND // MONITOR SYSTEM v2.0</span>
+            </div>
+            <div class="header-right">
+                <span class="header-status" id="header-status">
+                    <span class="status-indicator online"></span>
+                    <span>STATUS: ONLINE</span>
+                </span>
+                <span class="header-clock" id="current-time">00:00:00</span>
+            </div>
+        </div>
+        <div class="header-divider">
+            <span class="divider-label">PRTS TERMINAL</span>
+            <span class="divider-line"></span>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <!-- ==================== 本机状态区域 ==================== -->
+        <section class="local-status-section" id="local-status-section">
+            <div class="section-title">
+                <span class="title-marker">&#9654;</span>
+                <span>LOCALHOST // 本机状态</span>
+                <span class="metric-tag" id="local-hostname" style="margin-left: auto;">---</span>
+                <span class="metric-tag" id="local-cores">---</span>
+            </div>
+            <div class="local-status-panel">
+                <div class="local-metric-row">
+                    <div class="local-metric">
+                        <span class="metric-tag">CPU // 处理器</span>
+                        <div class="progress-segmented" id="local-cpu-bar">
+                            <div class="progress-segments" data-value="0"></div>
+                        </div>
+                        <span class="metric-value" id="local-cpu-value">--.- %</span>
+                    </div>
+                    <div class="local-metric">
+                        <span class="metric-tag">MEMORY // 内存</span>
+                        <div class="progress-segmented" id="local-mem-bar">
+                            <div class="progress-segments" data-value="0"></div>
+                        </div>
+                        <span class="metric-value" id="local-mem-value">--.- %</span>
+                    </div>
+                    <div class="local-metric">
+                        <span class="metric-tag">DISK // 磁盘</span>
+                        <div class="progress-segmented" id="local-disk-bar">
+                            <div class="progress-segments" data-value="0"></div>
+                        </div>
+                        <span class="metric-value" id="local-disk-value">--.- %</span>
+                    </div>
+                    <div class="local-metric">
+                        <span class="metric-tag">PROC // 进程数</span>
+                        <span class="metric-value metric-value-inline" id="local-proc-value">---</span>
+                    </div>
+                    <div class="local-metric">
+                        <span class="metric-tag">UPTIME // 运行时间</span>
+                        <span class="metric-value metric-value-inline" id="local-uptime-value">--:--</span>
+                    </div>
+                    <div class="local-metric">
+                        <span class="metric-tag">NET // 网络</span>
+                        <span class="metric-value metric-value-inline" id="local-net-value">&#8593;--- &#8595;---</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 模拟服务器迷你卡片 ==================== -->
+        <section class="server-cards-section" id="server-cards-section">
+            <div class="section-title">
+                <span class="title-marker">&#9654;</span>
+                <span>SERVER NODES // 节点状态</span>
+            </div>
+            <div class="server-cards-grid" id="server-cards-grid">
+                <!-- 由 JS 动态渲染 -->
+                <div class="mini-card mini-card-placeholder">
+                    <span class="placeholder-text">LOADING...</span>
+                </div>
+                <div class="mini-card mini-card-placeholder">
+                    <span class="placeholder-text">LOADING...</span>
+                </div>
+                <div class="mini-card mini-card-placeholder">
+                    <span class="placeholder-text">LOADING...</span>
+                </div>
+                <div class="mini-card mini-card-placeholder">
+                    <span class="placeholder-text">LOADING...</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 概览统计 ==================== -->
+        <section class="overview-strip" id="overview-strip">
+            <div class="overview-item">
+                <span class="ov-label">SERVERS // 服务器</span>
+                <span class="ov-value" id="total-servers">-</span>
+                <span class="ov-sub"><span class="ov-tag ov-tag-ok" id="online-count">0 ONLINE</span> <span class="ov-tag ov-tag-warn" id="warning-count">0 WARNING</span></span>
+            </div>
+            <div class="overview-item">
+                <span class="ov-label">AVG CPU // 平均处理器</span>
+                <span class="ov-value ov-value-blue" id="avg-cpu">-</span>
+            </div>
+            <div class="overview-item">
+                <span class="ov-label">AVG MEM // 平均内存</span>
+                <span class="ov-value ov-value-yellow" id="avg-memory">-</span>
+            </div>
+            <div class="overview-item">
+                <span class="ov-label">ALERTS // 告警</span>
+                <span class="ov-value ov-value-red" id="alert-count">-</span>
+            </div>
+        </section>
+
+        <!-- ==================== 工具栏 ==================== -->
+        <section class="toolbar-section">
+            <div class="toolbar-left">
+                <label class="toolbar-label">SELECT NODE // 选择节点:</label>
+                <select id="server-select" class="toolbar-select">
+                    <option value="">LOADING...</option>
+                </select>
+                <select id="time-range" class="toolbar-select">
+                    <option value="30">30 MIN // 30分钟</option>
+                    <option value="60" selected>1 HR // 1小时</option>
+                    <option value="360">6 HR // 6小时</option>
+                    <option value="1440">24 HR // 24小时</option>
+                </select>
+            </div>
+            <div class="toolbar-right">
+                <button class="btn-action" id="btn-refresh">&#8635; REFRESH // 刷新</button>
+            </div>
+        </section>
+
+        <!-- ==================== 实时环形图（本机 + 选中服务器） ==================== -->
+        <section class="gauge-section">
+            <div class="section-title">
+                <span class="title-marker">&#9654;</span>
+                <span>REALTIME METRICS // 实时指标</span>
+            </div>
+            <div class="gauge-grid">
+                <div class="gauge-box">
+                    <div class="gauge-label">CPU // 处理器</div>
+                    <div id="gauge-cpu" class="gauge-chart"></div>
+                </div>
+                <div class="gauge-box">
+                    <div class="gauge-label">MEMORY // 内存</div>
+                    <div id="gauge-memory" class="gauge-chart"></div>
+                </div>
+                <div class="gauge-box">
+                    <div class="gauge-label">DISK // 磁盘</div>
+                    <div id="gauge-disk" class="gauge-chart"></div>
+                </div>
+                <div class="gauge-box">
+                    <div class="gauge-label">NETWORK // 网络</div>
+                    <div id="gauge-network" class="gauge-chart"></div>
+                </div>
+                <!-- 本机实时环形图 -->
+                <div class="gauge-box gauge-box-local">
+                    <div class="gauge-label">LOCAL CPU // 本机处理器</div>
+                    <div id="gauge-local-cpu" class="gauge-chart"></div>
+                </div>
+                <div class="gauge-box gauge-box-local">
+                    <div class="gauge-label">LOCAL MEM // 本机内存</div>
+                    <div id="gauge-local-mem" class="gauge-chart"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 趋势图表（2x2 网格） ==================== -->
+        <section class="charts-section">
+            <div class="chart-box">
+                <div class="chart-title">&#9654; CPU USAGE TREND // CPU使用率趋势</div>
+                <div id="chart-cpu" class="chart-area"></div>
+            </div>
+            <div class="chart-box">
+                <div class="chart-title">&#9654; MEMORY USAGE TREND // 内存使用率趋势</div>
+                <div id="chart-memory" class="chart-area"></div>
+            </div>
+            <div class="chart-box">
+                <div class="chart-title">&#9654; DISK USAGE TREND // 磁盘使用率趋势</div>
+                <div id="chart-disk" class="chart-area"></div>
+            </div>
+            <div class="chart-box">
+                <div class="chart-title">&#9654; NETWORK TRAFFIC // 网络流量趋势</div>
+                <div id="chart-network" class="chart-area"></div>
+            </div>
+        </section>
+
+        <!-- ==================== 服务器列表表格 ==================== -->
+        <section class="table-section">
+            <div class="section-title">
+                <span class="title-marker">&#9654;</span>
+                <span>SERVER STATUS TABLE // 服务器状态列表</span>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>NAME // 名称</th>
+                            <th>IP ADDRESS // 地址</th>
+                            <th>STATUS // 状态</th>
+                            <th>CPU // 处理器</th>
+                            <th>MEMORY // 内存</th>
+                            <th>DISK // 磁盘</th>
+                            <th>OS // 系统</th>
+                        </tr>
+                    </thead>
+                    <tbody id="server-table-body">
+                        <tr><td colspan="7" class="cell-loading">LOADING // 加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ==================== 本机进程表格 ==================== -->
+        <section class="table-section">
+            <div class="section-title">
+                <span class="title-marker">&#9654;</span>
+                <span>LOCAL PROCESSES // 本机进程</span>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>PID</th>
+                            <th>NAME // 进程名</th>
+                            <th>CPU // 处理器</th>
+                            <th>MEMORY // 内存</th>
+                            <th>STATUS // 状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="local-process-body">
+                        <tr><td colspan="5" class="cell-loading">LOADING // 加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ==================== 告警列表 ==================== -->
+        <section class="alert-section">
+            <div class="section-title">
+                <span class="title-marker">&#9654;</span>
+                <span>ALERT LOG // 告警日志</span>
+            </div>
+            <div class="alert-list" id="alert-list">
+                <p class="no-data">NO ACTIVE ALERTS // 暂无告警</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- ==================== 底部 ==================== -->
+    <footer class="terminal-footer">
+        <span>PRTS MONITOR SYSTEM v2.0 // RHODES ISLAND INFRASTRUCTURE</span>
+        <span class="footer-sep">//</span>
+        <span>POWERED BY FLASK + ECHARTS + DOCKER</span>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

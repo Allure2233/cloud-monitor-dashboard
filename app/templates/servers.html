@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服务器列表 - Cloud Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <span class="logo">&#9729;</span>
+            <h1>Cloud Monitor</h1>
+            <span style="color: var(--text-muted); font-size: 14px;">/ 服务器管理</span>
+        </div>
+        <div class="header-right">
+            <a href="/" style="color: var(--accent-blue); text-decoration: none;">返回仪表盘</a>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <section class="server-list-section">
+            <h3>服务器状态列表</h3>
+            <table class="server-table">
+                <thead>
+                    <tr>
+                        <th>服务器名称</th>
+                        <th>IP 地址</th>
+                        <th>状态</th>
+                        <th>CPU</th>
+                        <th>内存</th>
+                        <th>磁盘</th>
+                        <th>操作系统</th>
+                        <th>更新时间</th>
+                    </tr>
+                </thead>
+                <tbody id="server-table-body">
+                    <tr><td colspan="8" class="loading">加载中...</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <footer class="footer">
+        Cloud Monitor Dashboard &copy; 2026 | Powered by Flask + ECharts + Docker
+    </footer>
+
+    <script>
+        const STATUS_TEXT_MAP = {online:'在线', offline:'离线', warning:'警告'};
+
+        async function loadServers() {
+            try {
+                const resp = await fetch('/api/servers');
+                const result = await resp.json();
+                const servers = result.data;
+                const tbody = document.getElementById('server-table-body');
+                tbody.innerHTML = servers.map(s => {
+                    const statusLabel = STATUS_TEXT_MAP[s.status] || s.status;
+                    return '<tr>' +
+                        '<td><strong>' + s.name + '</strong></td>' +
+                        '<td>' + s.ip_address + '</td>' +
+                        '<td><span class="status-badge status-' + s.status + '">' + statusLabel + '</span></td>' +
+                        '<td>' + (s.latest_cpu || 0) + '%</td>' +
+                        '<td>' + (s.latest_memory || 0) + '%</td>' +
+                        '<td>' + (s.latest_disk || 0) + '%</td>' +
+                        '<td>' + (s.os_info || '-') + '</td>' +
+                        '<td>' + (s.updated_at || '-') + '</td>' +
+                    '</tr>';
+                }).join('');
+            } catch (e) {
+                console.error('加载失败:', e);
+            }
+        }
+        loadServers();
+    </script>
+</body>
+</html>

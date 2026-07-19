@@ -1,12 +1,17 @@
 # Cloud Monitor Dashboard
 
-基于 Python Flask + MySQL + ECharts + Docker 构建的**云服务器监控仪表盘**系统。
+基于 Python Flask + MySQL + ECharts + Docker 构建的**云服务器监控仪表盘**系统，鹰角网络（明日方舟 PRTS）科技风格 UI。
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![Flask](https://img.shields.io/badge/Flask-3.0-green)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+
+## 界面预览
+
+![Dashboard Overview](docs/screenshot.png)
+![Dashboard Full](docs/screenshot-full.png)
 
 ## 功能特性
 

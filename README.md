@@ -10,7 +10,13 @@
 
 ## 界面预览
 
+**总览：**
 ![Dashboard Overview](docs/screenshot.png)
+
+**实时图表（CPU/内存/磁盘/网络趋势）：**
+![Dashboard Charts](docs/screenshot-charts.png)
+
+**完整长截图：**
 ![Dashboard Full](docs/screenshot-full.png)
 
 ## 功能特性

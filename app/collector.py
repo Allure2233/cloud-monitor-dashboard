@@ -6,6 +6,25 @@ import platform
 import psutil
 
 
+def get_disk_usage():
+    """
+    跨平台获取磁盘使用情况，兼容 Windows 和 Linux
+    返回 psutil.disk_usage 的结果对象，失败则返回构造的默认对象
+    """
+    paths = ['/', 'C:\\', 'D:\\']
+    for path in paths:
+        try:
+            return psutil.disk_usage(path)
+        except Exception:
+            continue
+    class _DefaultDisk:
+        percent = 0.0
+        used = 0
+        total = 1
+        free = 0
+    return _DefaultDisk()
+
+
 def get_system_info():
     """获取当前服务器的系统信息"""
     return {
@@ -27,23 +46,9 @@ def get_current_metrics():
     cpu_percent = psutil.cpu_percent(interval=1)
 
     mem = psutil.virtual_memory()
-    disk = psutil.virtual_memory()  # 备用
+    disk = get_disk_usage()
 
-    # 获取磁盘使用情况（根分区）
-    try:
-        disk = psutil.disk_usage('/')
-    except Exception:
-        try:
-            disk = psutil.disk_usage('C:\\')
-        except Exception:
-            disk_usage = 0
-            disk_used = 0
-            disk_total = 1
-
-    # 获取网络 I/O（计算增量）
     net = psutil.net_io_counters()
-
-    # 获取进程数
     process_count = len(psutil.pids())
 
     return {

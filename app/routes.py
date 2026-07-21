@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request
 import psutil
 from app import db
+from app.collector import get_disk_usage
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -15,16 +16,18 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 @api_bp.route('/servers', methods=['GET'])
 def get_servers():
-    """获取所有服务器列表及最新状态"""
+    """获取所有服务器列表及最新状态（优化版：一次JOIN代替3个子查询）"""
     servers = db.query_all("""
         SELECT s.*,
-            (SELECT cpu_usage FROM metrics
-             WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_cpu,
-            (SELECT memory_usage FROM metrics
-             WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_memory,
-            (SELECT disk_usage FROM metrics
-             WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_disk
+               m.cpu_usage AS latest_cpu,
+               m.memory_usage AS latest_memory,
+               m.disk_usage AS latest_disk
         FROM servers s
+        LEFT JOIN metrics m ON m.id = (
+            SELECT id FROM metrics
+            WHERE server_id = s.id
+            ORDER BY recorded_at DESC LIMIT 1
+        )
         ORDER BY s.name
     """)
     return jsonify({'code': 200, 'data': servers})
@@ -51,7 +54,7 @@ def get_metrics(server_id):
       - minutes: 查询最近多少分钟的数据 (默认60)
     """
     minutes = request.args.get('minutes', 60, type=int)
-    minutes = min(max(minutes, 1), 1440)  # 限制在 1-1440 分钟之间
+    minutes = min(max(minutes, 1), 1440)
 
     since = datetime.now() - timedelta(minutes=minutes)
     metrics = db.query_all("""
@@ -97,7 +100,10 @@ def get_metrics_summary(server_id):
             ROUND(MIN(cpu_usage), 2) AS min_cpu,
             ROUND(AVG(memory_usage), 2) AS avg_memory,
             ROUND(MAX(memory_usage), 2) AS max_memory,
+            ROUND(MIN(memory_usage), 2) AS min_memory,
             ROUND(AVG(disk_usage), 2) AS avg_disk,
+            ROUND(MAX(disk_usage), 2) AS max_disk,
+            ROUND(MIN(disk_usage), 2) AS min_disk,
             ROUND(AVG(network_in), 0) AS avg_net_in,
             ROUND(AVG(network_out), 0) AS avg_net_out,
             COUNT(*) AS data_points
@@ -146,19 +152,25 @@ def get_alerts():
 @api_bp.route('/alerts', methods=['POST'])
 def create_alert():
     """手动创建告警"""
-    data = request.get_json()
+    data = request.get_json() or {}
     required = ['server_id', 'metric_type', 'current_value', 'threshold_value']
     if not all(k in data for k in required):
         return jsonify({'code': 400, 'message': '缺少必要参数'}), 400
 
+    try:
+        server_id = int(data['server_id'])
+        current_value = float(data['current_value'])
+        threshold_value = float(data['threshold_value'])
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': '参数类型错误'}), 400
+
+    metric_type = str(data['metric_type'])[:20]
+    message = str(data.get('message', ''))[:500]
+
     alert_id = db.insert_and_get_id("""
         INSERT INTO alerts (server_id, metric_type, current_value, threshold_value, message)
         VALUES (%s, %s, %s, %s, %s)
-    """, (
-        data['server_id'], data['metric_type'],
-        data['current_value'], data['threshold_value'],
-        data.get('message', '')
-    ))
+    """, (server_id, metric_type, current_value, threshold_value, message))
 
     return jsonify({'code': 201, 'data': {'id': alert_id}})
 
@@ -166,11 +178,72 @@ def create_alert():
 @api_bp.route('/alerts/<int:alert_id>/resolve', methods=['PUT'])
 def resolve_alert(alert_id):
     """标记告警为已解决"""
-    db.execute(
-        "UPDATE alerts SET is_resolved = 1, resolved_at = NOW() WHERE id = %s",
+    affected = db.execute(
+        "UPDATE alerts SET is_resolved = 1, resolved_at = NOW() WHERE id = %s AND is_resolved = 0",
         (alert_id,)
     )
+    if affected == 0:
+        return jsonify({'code': 400, 'message': '告警不存在或已解决'})
     return jsonify({'code': 200, 'message': '告警已解决'})
+
+
+@api_bp.route('/alerts/evaluate', methods=['POST'])
+def evaluate_alerts():
+    """
+    根据告警规则检测所有服务器最新指标，超阈值自动生成告警
+    返回新生成的告警数量
+    """
+    rules = db.query_all("SELECT * FROM alert_rules WHERE is_active = 1")
+    if not rules:
+        return jsonify({'code': 200, 'data': {'new_alerts': 0}})
+
+    servers = db.query_all("""
+        SELECT s.id AS server_id, s.name AS server_name,
+               m.cpu_usage, m.memory_usage, m.disk_usage, m.process_count
+        FROM servers s
+        LEFT JOIN metrics m ON m.id = (
+            SELECT id FROM metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
+        )
+    """)
+
+    new_alerts = 0
+    for server in servers:
+        sid = server['server_id']
+        metric_map = {
+            'cpu': server.get('cpu_usage'),
+            'memory': server.get('memory_usage'),
+            'disk': server.get('disk_usage'),
+            'process': server.get('process_count'),
+        }
+        for rule in rules:
+            if rule['server_id'] is not None and rule['server_id'] != sid:
+                continue
+            metric_type = rule['metric_type']
+            value = metric_map.get(metric_type)
+            if value is None:
+                continue
+            threshold = rule['threshold']
+            op = rule['operator']
+            triggered = (
+                (op == 'gt' and value > threshold) or
+                (op == 'lt' and value < threshold) or
+                (op == 'eq' and abs(value - threshold) < 0.01)
+            )
+            if triggered:
+                message = f"服务器[{server['server_name']}] {metric_type}={value} 超过阈值 {op} {threshold}"
+                existing = db.query_one("""
+                    SELECT id FROM alerts
+                    WHERE server_id = %s AND metric_type = %s AND is_resolved = 0
+                    ORDER BY created_at DESC LIMIT 1
+                """, (sid, metric_type))
+                if not existing:
+                    db.insert_and_get_id("""
+                        INSERT INTO alerts (server_id, rule_id, metric_type, current_value, threshold_value, message)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (sid, rule['id'], metric_type, value, threshold, message))
+                    new_alerts += 1
+
+    return jsonify({'code': 200, 'data': {'new_alerts': new_alerts}})
 
 
 # ==================== 系统概览 ====================
@@ -178,7 +251,6 @@ def resolve_alert(alert_id):
 @api_bp.route('/overview', methods=['GET'])
 def get_overview():
     """获取系统总体概览数据"""
-    # 服务器统计
     server_stats = db.query_one("""
         SELECT
             COUNT(*) AS total,
@@ -188,12 +260,10 @@ def get_overview():
         FROM servers
     """)
 
-    # 未解决告警数
     alert_count = db.query_one(
         "SELECT COUNT(*) AS count FROM alerts WHERE is_resolved = 0"
     )
 
-    # 全部服务器最新指标的平均值
     avg_metrics = db.query_one("""
         SELECT
             ROUND(AVG(m.cpu_usage), 2) AS avg_cpu,
@@ -244,16 +314,7 @@ def health_check():
 def get_local_status():
     """获取本机（运行 Flask 的机器）的真实系统信息"""
     mem = psutil.virtual_memory()
-
-    # 获取磁盘总量（兼容 Windows 和 Linux）
-    try:
-        disk = psutil.disk_usage('/')
-    except Exception:
-        try:
-            disk = psutil.disk_usage('C:\\')
-        except Exception:
-            disk = None
-
+    disk = get_disk_usage()
     boot_time = datetime.fromtimestamp(psutil.boot_time()).isoformat()
 
     data = {
@@ -263,7 +324,7 @@ def get_local_status():
         'cpu_cores_physical': psutil.cpu_count(logical=False) or 0,
         'total_memory_mb': round(mem.total / (1024 * 1024), 2),
         'total_memory_gb': round(mem.total / (1024 * 1024 * 1024), 2),
-        'total_disk_gb': round(disk.total / (1024 * 1024 * 1024), 2) if disk else 0.0,
+        'total_disk_gb': round(disk.total / (1024 * 1024 * 1024), 2) if disk.total > 1 else 0.0,
         'platform': platform.platform(),
         'boot_time': boot_time,
     }
@@ -273,11 +334,9 @@ def get_local_status():
 @api_bp.route('/local/metrics', methods=['GET'])
 def get_local_metrics():
     """获取本机实时监控指标（用 psutil 采集）"""
-    # CPU 使用率
     cpu_usage = psutil.cpu_percent(interval=1)
     cpu_per_core = psutil.cpu_percent(interval=0, percpu=True)
 
-    # CPU 频率
     cpu_freq = None
     try:
         freq = psutil.cpu_freq()
@@ -290,35 +349,19 @@ def get_local_metrics():
     except Exception:
         cpu_freq = None
 
-    # 内存
     mem = psutil.virtual_memory()
-
-    # 磁盘（兼容 Windows 和 Linux）
-    try:
-        disk = psutil.disk_usage('/')
-    except Exception:
-        try:
-            disk = psutil.disk_usage('C:\\')
-        except Exception:
-            disk = None
-
-    # 网络（累计值）
+    disk = get_disk_usage()
     net = psutil.net_io_counters()
-
-    # 进程数
     process_count = len(psutil.pids())
 
-    # 开机时间和运行时长
     boot_ts = psutil.boot_time()
     boot_time = datetime.fromtimestamp(boot_ts).isoformat()
     uptime_hours = round((time.time() - boot_ts) / 3600, 2)
 
-    # 温度（可能获取不到）
     temperature = None
     try:
         temps = psutil.sensors_temperatures()
         if temps:
-            # 取第一个传感器的当前读数
             for name, entries in temps.items():
                 if entries:
                     temperature = round(entries[0].current, 1)
@@ -333,10 +376,10 @@ def get_local_metrics():
         'memory_total_gb': round(mem.total / (1024 ** 3), 2),
         'memory_used_gb': round(mem.used / (1024 ** 3), 2),
         'memory_available_gb': round(mem.available / (1024 ** 3), 2),
-        'disk_usage': round(disk.percent, 2) if disk else 0.0,
-        'disk_total_gb': round(disk.total / (1024 ** 3), 2) if disk else 0.0,
-        'disk_used_gb': round(disk.used / (1024 ** 3), 2) if disk else 0.0,
-        'disk_free_gb': round(disk.free / (1024 ** 3), 2) if disk else 0.0,
+        'disk_usage': round(disk.percent, 2),
+        'disk_total_gb': round(disk.total / (1024 ** 3), 2),
+        'disk_used_gb': round(disk.used / (1024 ** 3), 2),
+        'disk_free_gb': round(disk.free / (1024 ** 3), 2),
         'network_sent_mb': round(net.bytes_sent / (1024 ** 2), 2),
         'network_recv_mb': round(net.bytes_recv / (1024 ** 2), 2),
         'process_count': process_count,
@@ -366,8 +409,38 @@ def get_local_processes():
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 
-    # 按 CPU 占用降序排序，取 Top 10；CPU 相同则按内存排序
     processes.sort(key=lambda p: (-p['cpu'], -p['memory_mb']))
     top10 = processes[:10]
 
     return jsonify({'code': 200, 'data': top10})
+
+
+# ==================== 数据清理 ====================
+
+@api_bp.route('/admin/cleanup', methods=['DELETE'])
+def cleanup_old_data():
+    """
+    删除指定天数之前的历史指标数据（默认使用配置 DATA_RETENTION_DAYS=7）
+    参数: days 可覆盖默认天数
+    仅供管理用途，实际项目中应由定时任务调用
+    """
+    from app.config import Config
+    days = request.args.get('days', Config.DATA_RETENTION_DAYS, type=int)
+    days = max(days, 1)
+    cutoff = datetime.now() - timedelta(days=days)
+
+    metrics_deleted = db.execute(
+        "DELETE FROM metrics WHERE recorded_at < %s", (cutoff,)
+    )
+    alerts_deleted = db.execute(
+        "DELETE FROM alerts WHERE is_resolved = 1 AND created_at < %s", (cutoff,)
+    )
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'deleted_metrics': metrics_deleted,
+            'deleted_resolved_alerts': alerts_deleted,
+            'cutoff_date': cutoff.isoformat()
+        }
+    })
